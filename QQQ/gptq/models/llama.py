@@ -199,8 +199,8 @@ class QuantizedLlamaAttention(nn.Module):
         self.o_proj = QuantLinear(wbits, group_size, self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self._init_rope()
     
-    _init_rope = LlamaAttention._init_rope
-    _shape = LlamaAttention._shape
+    # _init_rope = LlamaAttention._init_rope
+    # _shape = LlamaAttention._shape
     forward = LlamaAttention.forward
     
     

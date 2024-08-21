@@ -18,6 +18,7 @@ logger = logging.getLogger("QQQ")
 
 
 def make_huggingface_training_args(batch_size):
+    logger.info("making hugging face training args")
     training_args = TrainingArguments(
         output_dir="output_dir",
         per_device_train_batch_size=batch_size,
@@ -27,6 +28,7 @@ def make_huggingface_training_args(batch_size):
 
 
 def prepare_data(tokenizer, calibrate_path, training_args, calibrate_num, max_length):
+    logger.info("entering the prepare data method")
     if "wiki" in calibrate_path:
         if "cali" not in calibrate_path:
             raw_dataset = load_from_disk(calibrate_path)
@@ -47,8 +49,9 @@ def prepare_data(tokenizer, calibrate_path, training_args, calibrate_num, max_le
             cali_data.save_to_disk(calibrate_path)
         cali_data = load_from_disk(calibrate_path)
     elif "pile" in calibrate_path:
+        logger.info("creating the calibration dataset")
         if "cali" not in calibrate_path:
-            raw_dataset = load_dataset("json", data_files=calibrate_path, split="train")
+            raw_dataset = load_dataset("mit-han-lab/pile-val-backup", split="validation")
             random_rows = random.sample(range(raw_dataset.num_rows), calibrate_num)
             raw_dataset = raw_dataset.select(random_rows)
             calibrate_path = os.path.join(
@@ -111,13 +114,14 @@ def smooth(model, tokenizer, q_config, args):
     # get cali data
     logger.info("begin building calibration data!")
     training_args = make_huggingface_training_args(args.batch_size)
+    print("done making training args")
     cali_data = prepare_data(
         tokenizer,
         q_config.calibrate_path,
         training_args,
         q_config.calibrate,
         max_length=q_config.max_length
-    )
+    ) # prepare the calibration data for smoothing
     # get trainer
     dataloader = get_eval_dataloader(cali_data, training_args)
     fp_input, fp_output = prepare_input_output(model, dataloader)
@@ -130,7 +134,9 @@ def smooth(model, tokenizer, q_config, args):
         from .quantization import migration_llama as migration
     else:
         raise NotImplementedError
+    # print(model)
     migration.set_search_class(args.smooth_method)
+    # print(model)
 
     for name, module in model.named_modules():
         if isinstance(module, QuantizedModule):

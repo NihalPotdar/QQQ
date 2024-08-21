@@ -54,6 +54,8 @@ def main():
     model, tokenizer = build_model_and_tokenizer(
         args.model_path, args.tokenizer_path, args.dtype
     )
+    model_inputs = tokenizer(["Talk about the city of bangalore"], return_tensors="pt").to("cuda")
+    print(tokenizer.batch_decode(model.generate(**model_inputs)))
 
     # smooth model
     model = quantize_model(model, q_config, args)
@@ -66,7 +68,12 @@ def main():
     model, tokenizer = build_model_and_tokenizer(
         args.model_path, args.tokenizer_path, args.dtype
     )
+
+    #vibe checks
     model = export_smoothed_model(model, scale_list)
+    print(tokenizer.batch_decode(model.generate(**model_inputs)))
+
+    # the first quantization process is complete by this point
 
     # apply gptq
     model = prepare_for_inference(model, args.device, args.dtype)

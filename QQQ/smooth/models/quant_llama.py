@@ -70,7 +70,7 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors.
 
     Args:
@@ -91,12 +91,15 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     Returns:
         `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
     """
-    cos = cos[position_ids].unsqueeze(unsqueeze_dim)
-    sin = sin[position_ids].unsqueeze(unsqueeze_dim)
+    # print(cos.shape)
+    cos = cos.unsqueeze(unsqueeze_dim)
+    # print(cos.shape)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    # print(q.shape)
+    # print(sin.shape)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
-
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -177,6 +180,7 @@ class QuantizedLlamaAttention(QuantizedModule):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         observation_mask=None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
@@ -200,10 +204,21 @@ class QuantizedLlamaAttention(QuantizedModule):
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value[0].shape[-2]
-        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+
+        if position_embeddings is None:
+            logger.warning_once(
+                "The attention layers in this model are transitioning from computing the RoPE embeddings internally "
+                "through `position_ids` (2D tensor with the indexes of the tokens), to using externally computed "
+                "`position_embeddings` (Tuple of tensors, containing cos and sin). In v4.45 `position_ids` will be "
+                "removed and `position_embeddings` will be mandatory."
+            )
+            cos, sin = self.rotary_emb(value_states, position_ids)
+        else:
+            cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin, position_ids
+            query_states, key_states, cos, sin
         )
+
         # [bsz, nh, t, hd]
         if past_key_value is not None:
             # reuse k, v, self_attention
@@ -230,7 +245,8 @@ class QuantizedLlamaAttention(QuantizedModule):
                 raise ValueError(
                     f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
                 )
-            attn_weights = attn_weights + attention_mask
+            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+            attn_weights = attn_weights + causal_mask
             attn_weights = torch.max(
                 attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min)
             )
@@ -331,6 +347,7 @@ class QuantizedLlamaDecoderLayer(QuantizedModule):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         observation_mask=None,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None, 
     ) -> Tuple[
         torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]
     ]:
@@ -366,12 +383,14 @@ class QuantizedLlamaDecoderLayer(QuantizedModule):
                     self.self_attn.v_proj.module.weight,
                 ]
             )
+
             extra_dict = {
                 "num_heads": self.self_attn.num_heads,
                 "num_key_value_heads": self.self_attn.num_key_value_heads,
                 "num_key_value_groups": self.self_attn.num_key_value_groups,
-                "cos_cached": self.self_attn.rotary_emb.cos_cached,
-                "sin_cached": self.self_attn.rotary_emb.sin_cached,
+                # "cos_cached": self.self_attn.rotary_emb.cos_cached,
+                # "sin_cached": self.self_attn.rotary_emb.sin_cached,
+                "rotary_emb": self.self_attn.rotary_emb,
                 "head_dim": self.self_attn.head_dim,
                 "position_ids": position_ids,
                 "attention_mask": attention_mask,
@@ -402,6 +421,7 @@ class QuantizedLlamaDecoderLayer(QuantizedModule):
             output_attentions=output_attentions,
             use_cache=use_cache,
             observation_mask=observation_mask,
+            position_embeddings=position_embeddings,
         )
         hidden_states = residual + hidden_states
 

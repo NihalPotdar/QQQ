@@ -190,15 +190,19 @@ class MigratorBase(nn.Module):
             .transpose(1, 2)
         )
 
+        # print(v.shape)
+
         kv_seq_len = k.shape[-2]
         # cos, sin = (
         #     self.extra_dict["cos_cached"][:, :, :kv_seq_len, ...],
         #     self.extra_dict["sin_cached"][:, :, :kv_seq_len, ...],
         # )
-        cos, sin = (
-            self.extra_dict["cos_cached"],
-            self.extra_dict["sin_cached"],
-        )
+        cos, sin = self.extra_dict["rotary_emb"].forward(v, self.extra_dict["position_ids"])
+        # print(cos.shape)
+        # print(kv_seq_len)
+        # print(self.extra_dict["position_ids"].shape)
+        # print(q.shape)
+        # print(k.shape)
         q, k = quant_llama.apply_rotary_pos_emb(
             q, k, cos, sin, self.extra_dict["position_ids"]
         )
